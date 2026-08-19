@@ -1,10 +1,10 @@
 
-
-
 "use client";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+
+import { createClient } from "@/lib/supabase/client";
 
 import DashboardHeader from "@/components/DashboardHeader";
 import DashboardStats from "@/components/DashboardStats";
@@ -18,27 +18,109 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 
 export default function DashboardPage() {
   const router = useRouter();
+  const supabase = createClient();
 
   const [name, setName] = useState("Student");
 
   useEffect(() => {
-    const savedProfile = localStorage.getItem("studentProfile");
-
-    if (savedProfile) {
+    const loadUserProfile = async () => {
       try {
-        const profile = JSON.parse(savedProfile);
+        /*
+         * -----------------------------------------
+         * 1. Get currently authenticated user
+         * -----------------------------------------
+         */
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
 
-        if (profile.fullName?.trim()) {
-          setName(profile.fullName);
+        if (userError) {
+          console.error(
+            "Dashboard Authentication Error:",
+            userError
+          );
+
+          return;
+        }
+
+        /*
+         * -----------------------------------------
+         * 2. Check if user exists
+         * -----------------------------------------
+         */
+        if (!user) {
+          router.replace("/auth");
+          return;
+        }
+
+        /*
+         * -----------------------------------------
+         * 3. Fetch user's profile from Supabase
+         * -----------------------------------------
+         */
+        const {
+          data: profile,
+          error: profileError,
+        } = await supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        /*
+         * -----------------------------------------
+         * 4. Handle profile fetch error
+         * -----------------------------------------
+         */
+        if (profileError) {
+          console.error(
+            "Dashboard Profile Fetch Error:",
+            {
+              message: profileError.message,
+              details: profileError.details,
+              hint: profileError.hint,
+              code: profileError.code,
+            }
+          );
+
+          /*
+           * If profile cannot be fetched,
+           * we can still use the email as fallback.
+           */
+          setName(
+            user.email?.split("@")[0] || "Student"
+          );
+
+          return;
+        }
+
+        /*
+         * -----------------------------------------
+         * 5. Set profile name
+         * -----------------------------------------
+         */
+        if (profile?.full_name?.trim()) {
+          setName(profile.full_name);
+        } else {
+          /*
+           * If full_name is empty,
+           * use email username as fallback.
+           */
+          setName(
+            user.email?.split("@")[0] || "Student"
+          );
         }
       } catch (error) {
         console.error(
-          "Failed to load profile:",
+          "Unexpected Dashboard Profile Error:",
           error
         );
       }
-    }
-  }, []);
+    };
+
+    loadUserProfile();
+  }, [router, supabase]);
 
   return (
     <ProtectedRoute>
